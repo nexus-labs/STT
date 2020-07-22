@@ -10,6 +10,7 @@ def create_flags():
     # ========
 
     f = absl.flags
+    f.DEFINE_string('model_dir', '', 'tmp ...')
 
     f.DEFINE_string('train_files', '', 'comma separated list of files specifying the dataset used for training. Multiple files will get merged. If empty, training will not be run.')
     f.DEFINE_string('dev_files', '', 'comma separated list of files specifying the dataset used for validation. Multiple files will get merged. If empty, validation will not be run.')

@@ -1,5 +1,5 @@
 # Main training requirements
-tensorflow == 1.14.0
+tensorflow-gpu == 1.14.0
 numpy == 1.15.4
 progressbar2
 pandas
@@ -7,6 +7,7 @@ six
 pyxdg
 attrdict
 absl-py
+ds_ctcdecoder == 0.6.1
 
 # Requirements for building native_client files
 setuptools
