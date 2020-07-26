@@ -31,8 +31,8 @@ def main():
             'License :: OSI Approved :: Mozilla Public License 2.0 (MPL 2.0)',
             'Programming Language :: Python :: 3',
         ],
-        package_dir={'': 'training'},
-        packages=find_packages(where='training'),
+        package_dir={'': './'},
+        packages=find_packages(where='./'),
         python_requires='>=3.5, <4',
         install_requires=_requires_from_file('requirements.txt'),
         # If there are data files included in your packages that need to be

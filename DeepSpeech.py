@@ -228,7 +228,7 @@ def calculate_mean_edit_distance_and_loss(iterator, dropout, reuse):
     logits, _ = create_model(batch_x, batch_seq_len, dropout, reuse=reuse, rnn_impl=rnn_impl)
 
     # Compute the CTC loss using TensorFlow's `ctc_loss`
-    total_loss = tfv1.nn.ctc_loss(labels=batch_y, inputs=logits, sequence_length=batch_seq_len)
+    total_loss = tfv1.nn.ctc_loss(labels=batch_y, inputs=logits, sequence_length=batch_seq_len, ignore_longer_outputs_than_inputs=True)
 
     # Check if any files lead to non finite loss
     non_finite_files = tf.gather(batch_filenames, tfv1.where(~tf.math.is_finite(total_loss)))
@@ -394,13 +394,54 @@ def log_grads_and_vars(grads_and_vars):
         log_variable(variable, gradient=gradient)
 
 
-def try_loading(session, saver, checkpoint_filename, caption, load_step=True, log_success=True):
+def try_loading(session, saver, checkpoint_filename, caption, load_step=True, log_success=True, allow_drop_layers=False):
     try:
         checkpoint = tf.train.get_checkpoint_state(FLAGS.checkpoint_dir, checkpoint_filename)
         if not checkpoint:
             return False
         checkpoint_path = checkpoint.model_checkpoint_path
-        saver.restore(session, checkpoint_path)
+
+        ckpt = tfv1.train.load_checkpoint(checkpoint_path)
+        vars_in_ckpt = frozenset(ckpt.get_variable_to_shape_map().keys())
+        load_vars = set(tfv1.global_variables())
+        init_vars = set()
+
+        # We explicitly allow the learning rate variable to be missing for backwards
+        # compatibility with older checkpoints.
+        lr_var = set(v for v in load_vars if v.op.name == 'learning_rate')
+        if lr_var and ('learning_rate' not in vars_in_ckpt or FLAGS.force_initialize_learning_rate):
+            assert len(lr_var) <= 1
+            load_vars -= lr_var
+            init_vars |= lr_var
+        
+        if allow_drop_layers and FLAGS.drop_source_layers > 0:
+            # This transfer learning approach requires supplying
+            # the layers which we exclude from the source model.
+            # Say we want to exclude all layers except for the first one,
+            # then we are dropping five layers total, so: drop_source_layers=5
+            # If we want to use all layers from the source model except
+            # the last one, we use this: drop_source_layers=1
+            if FLAGS.drop_source_layers > 6:
+                log_warn('The checkpoint only has 6 layers, but you are trying to drop '
+                         'all of them or more than all of them. Continuing and '
+                         'dropping only 5 layers.')
+                FLAGS.drop_source_layers = 6
+
+            dropped_layers = ['1', '2', '3', 'lstm', '5', '6'][:int(FLAGS.drop_source_layers)]
+            # Initialize all variables needed for DS, but not loaded from ckpt
+            for v in load_vars:
+                if any(layer in v.op.name for layer in dropped_layers):
+                    init_vars.add(v)
+            load_vars -= init_vars
+
+        for v in sorted(load_vars, key=lambda v: v.op.name):
+            log_info('Loading variable from checkpoint: %s' % (v.op.name))
+            v.load(ckpt.get_tensor(v.op.name), session=session)
+
+        for v in sorted(init_vars, key=lambda v: v.op.name):
+            log_info('Initializing variable: %s' % (v.op.name))
+            session.run(v.initializer)
+
         if load_step:
             restored_step = session.run(tfv1.train.get_global_step())
             if log_success:
@@ -549,9 +590,9 @@ def train():
         tfv1.get_default_graph().finalize()
 
         if not loaded and FLAGS.load in ['auto', 'last']:
-            loaded = try_loading(session, checkpoint_saver, 'checkpoint', 'most recent')
+            loaded = try_loading(session, checkpoint_saver, 'checkpoint', 'most recent', allow_drop_layers=True)
         if not loaded and FLAGS.load in ['auto', 'best']:
-            loaded = try_loading(session, best_dev_saver, 'best_dev_checkpoint', 'best validation')
+            loaded = try_loading(session, best_dev_saver, 'best_dev_checkpoint', 'best validation', allow_drop_layers=True)
         if not loaded:
             if FLAGS.load in ['auto', 'init']:
                 log_info('Initializing variables...')
@@ -574,8 +615,8 @@ def train():
 
             # Setup progress bar
             class LossWidget(progressbar.widgets.FormatLabel):
-                def __init__(self):
-                    progressbar.widgets.FormatLabel.__init__(self, format='Loss: %(mean_loss)f')
+                def __init__(self, phase=''):
+                    progressbar.widgets.FormatLabel.__init__(self, format=phase+'Loss: %(mean_loss)f')
 
                 def __call__(self, progress, data, **kwargs):
                     data['mean_loss'] = total_loss / step_count if step_count else 0.0
@@ -584,7 +625,7 @@ def train():
             prefix = 'Epoch {} | {:>10}'.format(epoch, 'Training' if is_train else 'Validation')
             widgets = [' | ', progressbar.widgets.Timer(),
                        ' | Steps: ', progressbar.widgets.Counter(),
-                       ' | ', LossWidget()]
+                       ' | ', LossWidget('Training' if is_train else 'Validation')]
             suffix = ' | Dataset: {}'.format(dataset) if dataset else None
             pbar = create_progressbar(prefix=prefix, widgets=widgets, suffix=suffix).start()
 

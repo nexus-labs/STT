@@ -63,11 +63,89 @@ def samples_to_mfccs(samples, sample_rate, train_phase=False):
 
     return mfccs, tf.shape(input=mfccs)[0]
 
+def samples_to_spectrogram(samples, sample_rate, train_phase=False):
+    spectrogram = contrib_audio.audio_spectrogram(samples,
+                                                  window_size=Config.audio_window_samples,
+                                                  stride=Config.audio_step_samples,
+                                                  magnitude_squared=True)
+    # Data Augmentations
+    if train_phase:
+        if FLAGS.augmentation_spec_dropout_keeprate < 1:
+            spectrogram = augment_dropout(spectrogram,
+                                          keep_prob=FLAGS.augmentation_spec_dropout_keeprate)
+
+        if FLAGS.augmentation_freq_and_time_masking:
+            spectrogram = augment_freq_time_mask(spectrogram,
+                                                 frequency_masking_para=FLAGS.augmentation_freq_and_time_masking_freq_mask_range,
+                                                 time_masking_para=FLAGS.augmentation_freq_and_time_masking_time_mask_range,
+                                                 frequency_mask_num=FLAGS.augmentation_freq_and_time_masking_number_freq_masks,
+                                                 time_mask_num=FLAGS.augmentation_freq_and_time_masking_number_time_masks)
+
+        if FLAGS.augmentation_pitch_and_tempo_scaling:
+            spectrogram = augment_pitch_and_tempo(spectrogram,
+                                                  max_tempo=FLAGS.augmentation_pitch_and_tempo_scaling_max_tempo,
+                                                  max_pitch=FLAGS.augmentation_pitch_and_tempo_scaling_max_pitch,
+                                                  min_pitch=FLAGS.augmentation_pitch_and_tempo_scaling_min_pitch)
+
+        if FLAGS.augmentation_speed_up_std > 0:
+            spectrogram = augment_speed_up(spectrogram, speed_std=FLAGS.augmentation_speed_up_std)
+    spectrogram = tf.slice(tf.reshape(spectrogram, [-1, int(Config.audio_window_samples/2)+1]), [0, 1], [-1, -1])
+    return spectrogram
+
+def hz2mel(f):
+    """Hzをmelに変換"""
+    return 2595 * np.log(f / 700.0 + 1.0)
+
+def mel2hz(m):
+    """melをhzに変換"""
+    return 700 * (np.exp(m / 2595) - 1.0)
+
+def melFilterBank(sample_rate=8000):
+    """メルフィルタバンクを作成"""
+    # ナイキスト周波数（Hz）
+    fmax = sample_rate / 2
+    # ナイキスト周波数（mel）
+    melmax = hz2mel(fmax)
+    # 周波数インデックスの最大数
+    nmax = int(Config.audio_window_samples / 2)
+    # 周波数解像度（周波数インデックス1あたりのHz幅）
+    df = sample_rate / Config.audio_window_samples
+    # メル尺度における各フィルタの中心周波数を求める
+    dmel = melmax / (Config.n_input + 1)
+    melcenters = np.arange(1, Config.n_input + 1) * dmel
+    # 各フィルタの中心周波数をHzに変換
+    fcenters = mel2hz(melcenters)
+    # 各フィルタの中心周波数を周波数インデックスに変換
+    indexcenter = np.round(fcenters / df)
+    # 各フィルタの開始位置のインデックス
+    indexstart = np.hstack(([0], indexcenter[0:Config.n_input - 1]))
+    # 各フィルタの終了位置のインデックス
+    indexstop = np.hstack((indexcenter[1:Config.n_input], [nmax]))
+    filterbank = np.zeros((Config.n_input, nmax))
+    print(indexstop)
+    for c in range(0, Config.n_input):
+        # 三角フィルタの左の直線の傾きから点を求める
+        increment= 1.0 / (indexcenter[c] - indexstart[c])
+        for i in range(int(indexstart[c]), int(indexcenter[c])):
+            filterbank[c, i] = (i - indexstart[c]) * increment
+        # 三角フィルタの右の直線の傾きから点を求める
+        decrement = 1.0 / (indexstop[c] - indexcenter[c])
+        for i in range(int(indexcenter[c]), int(indexstop[c])):
+            filterbank[c, i] = 1.0 - ((i - indexcenter[c]) * decrement)
+    return tf.convert_to_tensor(filterbank, dtype='float32')
+
 
 def audiofile_to_features(wav_filename, train_phase=False):
     samples = tf.io.read_file(wav_filename)
     decoded = contrib_audio.decode_wav(samples, desired_channels=1)
-    features, features_len = samples_to_mfccs(decoded.audio, decoded.sample_rate, train_phase=train_phase)
+    if FLAGS.feature == 'mfcc':
+        features = samples_to_mfccs(decoded.audio, decoded.sample_rate, train_phase=train_phase)
+    else:
+        spec = samples_to_spectrogram(decoded.audio, decoded.sample_rate, train_phase=train_phase)
+        filterbank = melFilterBank(FLAGS.audio_sample_rate)
+        features = tf.math.log(tf.tensordot(spec, filterbank, axes=[1, 1]))
+    print (tf.shape(features))
+    features_len = tf.shape(input=features)[0]
 
     if train_phase:
         if FLAGS.data_aug_features_multiplicative > 0:

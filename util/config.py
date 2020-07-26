@@ -75,7 +75,7 @@ def initialize_globals():
     # doc/Geometry.md
 
     # Number of MFCC features
-    c.n_input = 26 # TODO: Determine this programmatically from the sample rate
+    c.n_input = int(26 * (FLAGS.audio_sample_rate/16000)) # TODO: Determine this programmatically from the sample rate
 
     # The number of frames in the context
     c.n_context = 9 # TODO: Determine the optimal value using a validation data set
@@ -99,7 +99,7 @@ def initialize_globals():
     c.n_hidden_6 = c.alphabet.size() + 1 # +1 for CTC blank label
 
     # Size of audio window in samples
-    c.audio_window_samples = FLAGS.audio_sample_rate * (FLAGS.feature_win_len / 1000)
+    c.audio_window_samples = int(FLAGS.audio_sample_rate * (FLAGS.feature_win_len / 1000))
 
     # Stride for feature computations in samples
     c.audio_step_samples = FLAGS.audio_sample_rate * (FLAGS.feature_win_step / 1000)

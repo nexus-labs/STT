@@ -21,6 +21,7 @@ def create_flags():
     f.DEFINE_integer('feature_win_len', 32, 'feature extraction audio window length in milliseconds')
     f.DEFINE_integer('feature_win_step', 20, 'feature extraction window step length in milliseconds')
     f.DEFINE_integer('audio_sample_rate', 16000, 'sample rate value expected by model')
+    f.DEFINE_string('feature', 'mfcc', 'kind of feature')
 
     # Data Augmentation
     # ================
@@ -131,7 +132,13 @@ def create_flags():
     f.DEFINE_integer('es_steps', 4, 'number of validations to consider for early stopping. Loss is not stored in the checkpoint so when checkpoint is revived it starts the loss calculation from start at that point')
     f.DEFINE_float('es_mean_th', 0.5, 'mean threshold for loss to determine the condition if early stopping is required')
     f.DEFINE_float('es_std_th', 0.5, 'standard deviation threshold for loss to determine the condition if early stopping is required')
+    f.DEFINE_boolean('force_initialize_learning_rate', False, 'Force re-initialization of learning rate which was previously reduced.')
+    
+    # Transfer Learning
 
+    f.DEFINE_integer('drop_source_layers', 0, 'single integer for how many layers to drop from source model (to drop just input == 1, drop penultimate and input ==2, etc)')
+
+    
     # Decoder
 
     f.DEFINE_boolean('utf8', False, 'enable UTF-8 mode. When this is used the model outputs UTF-8 sequences directly rather than using an alphabet mapping.')
