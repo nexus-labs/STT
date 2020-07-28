@@ -139,13 +139,12 @@ def audiofile_to_features(wav_filename, train_phase=False):
     samples = tf.io.read_file(wav_filename)
     decoded = contrib_audio.decode_wav(samples, desired_channels=1)
     if FLAGS.feature == 'mfcc':
-        features = samples_to_mfccs(decoded.audio, decoded.sample_rate, train_phase=train_phase)
+        features, features_len = samples_to_mfccs(decoded.audio, decoded.sample_rate, train_phase=train_phase)
     else:
         spec = samples_to_spectrogram(decoded.audio, decoded.sample_rate, train_phase=train_phase)
         filterbank = melFilterBank(FLAGS.audio_sample_rate)
         features = tf.math.log(tf.tensordot(spec, filterbank, axes=[1, 1]))
-    print (tf.shape(features))
-    features_len = tf.shape(input=features)[0]
+        features_len = tf.shape(input=features)[0]
 
     if train_phase:
         if FLAGS.data_aug_features_multiplicative > 0:
